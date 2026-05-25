@@ -1,4 +1,4 @@
-# 💸 Moneyflow
+# 💸 Moneyflow React Native
 
 A cross-platform personal finance mobile application built with **React Native**, supporting both **Android** and **iOS**.
 
@@ -46,7 +46,7 @@ A cross-platform personal finance mobile application built with **React Native**
 ## Project Structure
 
 ```
-moneyflow/
+moneyflow-react-native/
 ├── __tests__/          # Jest test files
 ├── android/            # Native Android project
 ├── ios/                # Native iOS project (Xcode)
@@ -71,7 +71,7 @@ moneyflow/
 
 ```bash
 git clone <repository-url>
-cd moneyflow
+cd moneyflow-react-native
 ```
 
 ### 2. Install JavaScript dependencies
@@ -192,7 +192,7 @@ $RNFirebaseAsStaticFramework = true
 ### Configuration files
 
 - **Android:** Place `google-services.json` in `android/app/`
-- **iOS:** Place `GoogleService-Info.plist` in `ios/moneyflow/`
+- **iOS:** Place `GoogleService-Info.plist` in `ios/moneyflow-react-native/`
 
 > ⚠️ These files contain sensitive credentials — **never commit them to version control**. Add them to `.gitignore`.
 

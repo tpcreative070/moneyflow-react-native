@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================
-#  build.sh — React Native build & run script for "moneyflow"
+#  build.sh — React Native build & run script for "moneyflow-react-native"
 # ============================================================
 
 set -e
@@ -86,7 +86,7 @@ if [ ! -f "package.json" ]; then
   error "package.json not found. Please run this script from the project root."
 fi
 
-PROJECT_NAME=$(node -e "console.log(require('./package.json').name)" 2>/dev/null || echo "moneyflow")
+PROJECT_NAME=$(node -e "console.log(require('./package.json').name)" 2>/dev/null || echo "moneyflow-react-native")
 log "Project: ${PROJECT_NAME}"
 log "Platform: ${PLATFORM}"
 log "Mode: ${BUILD_MODE}"
