@@ -1,98 +1,279 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 💸 Moneyflow
 
-# Getting Started
+A cross-platform personal finance mobile application built with **React Native**, supporting both **Android** and **iOS**.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+---
 
-## Step 1: Start Metro
+## 📋 Table of Contents
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- [Requirements](#requirements)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Running the App](#running-the-app)
+- [Build Script](#build-script)
+- [Firebase Setup](#firebase-setup)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+---
 
-```sh
-# Using npm
-npm start
+## Requirements
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+### General
+| Tool | Version |
+|------|---------|
+| Node.js | >= 18.x |
+| npm | >= 9.x |
+| React Native CLI | latest |
 
 ### Android
+| Tool | Notes |
+|------|-------|
+| Android Studio | Latest stable |
+| Android SDK | API Level 33+ recommended |
+| `ANDROID_HOME` | Must be set as an environment variable |
+| JDK | 17 recommended |
 
-```sh
-# Using npm
-npm run android
+### iOS *(macOS only)*
+| Tool | Notes |
+|------|-------|
+| Xcode | 14+ |
+| CocoaPods | `sudo gem install cocoapods` |
+| iOS Simulator | Included with Xcode |
 
-# OR using Yarn
-yarn android
+---
+
+## Project Structure
+
+```
+moneyflow/
+├── __tests__/          # Jest test files
+├── android/            # Native Android project
+├── ios/                # Native iOS project (Xcode)
+├── src/                # Main application source
+├── google-services/    # Firebase config files
+├── node_modules/       # JS dependencies
+├── app.json            # App configuration
+├── babel.config.js     # Babel configuration
+├── metro.config.js     # Metro bundler configuration
+├── jest.config.js      # Jest configuration
+├── tsconfig.json       # TypeScript configuration
+├── package.json        # Project dependencies & scripts
+├── Gemfile             # Ruby gems (CocoaPods)
+└── build.sh            # Build & run helper script
 ```
 
-### iOS
+---
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## Getting Started
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+### 1. Clone the repository
 
-```sh
-bundle install
+```bash
+git clone <repository-url>
+cd moneyflow
 ```
 
-Then, and every time you update your native dependencies, run:
+### 2. Install JavaScript dependencies
 
-```sh
-bundle exec pod install
+```bash
+npm install
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+### 3. Install iOS pods *(macOS only)*
 
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+```bash
+cd ios && pod install && cd ..
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+### 4. Set up environment variables
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+Create a `.env` file in the project root (if applicable) and ensure your `ANDROID_HOME` is exported in your shell profile:
 
-## Step 3: Modify your app
+```bash
+# ~/.zshrc or ~/.bashrc
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export PATH=$PATH:$ANDROID_HOME/emulator
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+```
 
-Now that you have successfully run the app, let's make changes!
+---
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Running the App
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+### Using React Native CLI
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+**Start Metro bundler:**
+```bash
+npx react-native start
+```
 
-## Congratulations! :tada:
+**Run on Android:**
+```bash
+npx react-native run-android
+```
 
-You've successfully run and modified your React Native App. :partying_face:
+**Run on iOS:**
+```bash
+npx react-native run-ios
+```
 
-### Now what?
+**Run on a specific iOS simulator:**
+```bash
+npx react-native run-ios --simulator="iPhone 15"
+```
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+---
 
-# Troubleshooting
+## Build Script
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+A `build.sh` helper script is included in the project root for convenience.
 
-# Learn More
+### Make it executable (first time only)
 
-To learn more about React Native, take a look at the following resources:
+```bash
+chmod +x build.sh
+```
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
-# moneyflow-react-native
+### Usage
+
+```bash
+./build.sh [platform] [options]
+```
+
+### Platforms
+
+| Platform | Description |
+|----------|-------------|
+| `android` | Run on Android emulator or device |
+| `ios` | Run on iOS simulator or device |
+| `both` | Start Metro, then choose platform interactively |
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--release` | Build in release mode (default: debug) |
+| `--clean` | Clean build artifacts before running |
+| `--install-pods` | Re-install CocoaPods before iOS build |
+| `--device` | Target a physical device |
+| `--reset-cache` | Start Metro with `--reset-cache` |
+
+### Examples
+
+```bash
+# Run on Android emulator (debug)
+./build.sh android
+
+# Run on iOS simulator (debug)
+./build.sh ios
+
+# Clean and rebuild iOS with fresh pods
+./build.sh ios --clean --install-pods
+
+# Build release APK and run on device
+./build.sh android --release --device
+
+# Reset Metro cache and run on iOS simulator
+./build.sh ios --reset-cache
+```
+
+---
+
+## Firebase Setup
+
+This project uses **Firebase** with static framework linking, configured in the iOS `Podfile`:
+
+```ruby
+use_frameworks! :linkage => :static
+$RNFirebaseAsStaticFramework = true
+```
+
+### Configuration files
+
+- **Android:** Place `google-services.json` in `android/app/`
+- **iOS:** Place `GoogleService-Info.plist` in `ios/moneyflow/`
+
+> ⚠️ These files contain sensitive credentials — **never commit them to version control**. Add them to `.gitignore`.
+
+---
+
+## Testing
+
+Run the test suite with Jest:
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm test -- --watch
+
+# Run with coverage
+npm test -- --coverage
+```
+
+---
+
+## Troubleshooting
+
+### Metro bundler port already in use
+```bash
+npx react-native start --reset-cache
+# or kill the existing process
+lsof -ti:8081 | xargs kill
+```
+
+### Android — `ANDROID_HOME` not set
+Add to your shell profile:
+```bash
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+```
+
+### Android — Gradle build fails
+```bash
+cd android && ./gradlew clean && cd ..
+./build.sh android
+```
+
+### iOS — Pod install fails
+```bash
+cd ios
+pod deintegrate
+pod install --repo-update
+```
+
+### iOS — Xcode DerivedData cache issues
+```bash
+rm -rf ~/Library/Developer/Xcode/DerivedData
+./build.sh ios --clean --install-pods
+```
+
+### iOS — `use_frameworks!` conflicts with Firebase
+Ensure your `Podfile` contains:
+```ruby
+use_frameworks! :linkage => :static
+$RNFirebaseAsStaticFramework = true
+```
+Then re-run `pod install`.
+
+---
+
+## Scripts Reference
+
+| Command | Description |
+|---------|-------------|
+| `npm start` | Start Metro bundler |
+| `npm run android` | Run on Android |
+| `npm run ios` | Run on iOS |
+| `npm test` | Run Jest tests |
+| `npm run lint` | Run ESLint |
+| `./build.sh android` | Build & run Android (with helpers) |
+| `./build.sh ios` | Build & run iOS (with helpers) |
+
+---
+
+## License
+
+Private — All rights reserved.
