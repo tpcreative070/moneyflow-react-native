@@ -291,6 +291,116 @@ log "Target   : ${BOLD}$([ "$USE_DEVICE" = true ] && echo "Physical device" || e
 echo ""
 
 # ============================================================
+#  STEP 3.5 — Pick specific Simulator / Emulator
+# ============================================================
+SELECTED_IOS_SIM=""
+SELECTED_ANDROID_EMU=""
+
+if [ "$USE_DEVICE" = false ]; then
+  divider
+  echo ""
+
+  # ── iOS Simulator picker ──────────────────────────────────
+  if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "both" ]]; then
+    if [[ "$(uname)" == "Darwin" ]] && command -v xcrun >/dev/null 2>&1; then
+      echo -e "${BOLD}${BLUE}  🍎  Select iOS Simulator${NC}"
+      echo -e "  ${DIM}Fetching available simulators...${NC}"
+      echo ""
+
+      # Build list: filter available simulators — bash 3.2 compatible (no mapfile)
+      IOS_SIMS=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && IOS_SIMS+=("$line")
+      done < <(
+        xcrun simctl list devices available 2>/dev/null \
+          | grep -E "^\s+.+\(.{36}\) \((Booted|Shutdown)\)" \
+          | sed 's/^[[:space:]]*//' \
+          | sed 's/ (.*//' \
+          | sort -u
+      )
+
+      if [ ${#IOS_SIMS[@]} -eq 0 ]; then
+        warn "No available iOS simulators found — will use default."
+      else
+        for i in "${!IOS_SIMS[@]}"; do
+          echo -e "  ${BOLD}$((i+1)))${NC}  ${IOS_SIMS[$i]}"
+        done
+        echo ""
+        while true; do
+          read -rp "$(echo -e "  ${CYAN}Enter number [1-${#IOS_SIMS[@]}] or press Enter for default:${NC} ")" sim_choice
+          if [ -z "$sim_choice" ]; then
+            warn "No simulator selected — using default."
+            break
+          elif [[ "$sim_choice" =~ ^[0-9]+$ ]] && \
+               [ "$sim_choice" -ge 1 ] && \
+               [ "$sim_choice" -le "${#IOS_SIMS[@]}" ]; then
+            SELECTED_IOS_SIM="${IOS_SIMS[$((sim_choice-1))]}"
+            success "iOS Simulator : ${BOLD}${SELECTED_IOS_SIM}${NC}"
+            break
+          fi
+          echo -e "  ${RED}Invalid — enter a number between 1 and ${#IOS_SIMS[@]}.${NC}"
+        done
+        echo ""
+      fi
+    else
+      warn "xcrun not available — iOS simulator picker skipped."
+    fi
+  fi
+
+  # ── Android Emulator picker ───────────────────────────────
+  if [[ "$PLATFORM" == "android" || "$PLATFORM" == "both" ]]; then
+    if command -v emulator >/dev/null 2>&1 || \
+       [ -n "$ANDROID_HOME" ] && [ -f "$ANDROID_HOME/emulator/emulator" ]; then
+
+      EMU_BIN="${ANDROID_HOME}/emulator/emulator"
+      command -v emulator >/dev/null 2>&1 && EMU_BIN="emulator"
+
+      echo -e "${BOLD}${BLUE}  🤖  Select Android Emulator${NC}"
+      echo -e "  ${DIM}Fetching available AVDs...${NC}"
+      echo ""
+
+      # Fetch AVD list — bash 3.2 compatible (no mapfile)
+      ANDROID_EMUS=()
+      while IFS= read -r line; do
+        [ -n "$line" ] && ANDROID_EMUS+=("$line")
+      done < <("$EMU_BIN" -list-avds 2>/dev/null)
+
+      if [ ${#ANDROID_EMUS[@]} -eq 0 ]; then
+        warn "No Android AVDs found — will use default emulator."
+      else
+        for i in "${!ANDROID_EMUS[@]}"; do
+          # Mark already-running emulators
+          if command -v adb >/dev/null 2>&1; then
+            RUNNING=$(adb devices 2>/dev/null | grep -c "emulator")
+          else
+            RUNNING=0
+          fi
+          echo -e "  ${BOLD}$((i+1)))${NC}  ${ANDROID_EMUS[$i]}"
+        done
+        echo ""
+        while true; do
+          read -rp "$(echo -e "  ${CYAN}Enter number [1-${#ANDROID_EMUS[@]}] or press Enter for default:${NC} ")" emu_choice
+          if [ -z "$emu_choice" ]; then
+            warn "No emulator selected — using default."
+            break
+          elif [[ "$emu_choice" =~ ^[0-9]+$ ]] && \
+               [ "$emu_choice" -ge 1 ] && \
+               [ "$emu_choice" -le "${#ANDROID_EMUS[@]}" ]; then
+            SELECTED_ANDROID_EMU="${ANDROID_EMUS[$((emu_choice-1))]}"
+            success "Android Emulator : ${BOLD}${SELECTED_ANDROID_EMU}${NC}"
+            break
+          fi
+          echo -e "  ${RED}Invalid — enter a number between 1 and ${#ANDROID_EMUS[@]}.${NC}"
+        done
+        echo ""
+      fi
+    else
+      warn "Android emulator binary not found — skipping AVD picker. Make sure ANDROID_HOME is set."
+    fi
+  fi
+fi
+
+# ============================================================
 #  STEP 4 — Extra Options (multi-select)
 # ============================================================
 divider
@@ -322,10 +432,13 @@ echo ""
 echo -e "    Platform    : ${BOLD}${PLATFORM}${NC}"
 echo -e "    Mode        : ${BOLD}${BUILD_MODE}${NC}"
 echo -e "    Target      : ${BOLD}$([ "$USE_DEVICE" = true ] && echo "Physical device" || echo "Emulator / Simulator")${NC}"
+[ -n "$SELECTED_IOS_SIM"    ] && echo -e "    iOS Sim     : ${BOLD}${SELECTED_IOS_SIM}${NC}"
+[ -n "$SELECTED_ANDROID_EMU" ] && echo -e "    Android AVD : ${BOLD}${SELECTED_ANDROID_EMU}${NC}"
 echo -e "    Clean       : ${BOLD}${CLEAN}${NC}"
 echo -e "    Pods        : ${BOLD}${INSTALL_PODS}${NC}"
 echo -e "    Reset cache : ${BOLD}${RESET_CACHE}${NC}"
 echo -e "    Firebase    : ${BOLD}$([ -d "google-services" ] && echo "✓ will sync files + patch Gradle" || echo "⚠ google-services/ not found")${NC}"
+echo -e "    Podfile     : ${BOLD}$([ -f \"ios/Podfile\" ] && echo \"✓ will patch for Xcode 26+ compatibility\" || echo \"⚠ ios/Podfile not found\")${NC}"
 echo ""
 
 read -rp "$(echo -e "  ${YELLOW}Proceed? [Y/n]:${NC} ")" confirm
@@ -390,9 +503,90 @@ clean_ios() {
 }
 
 # ============================================================
+#  PATCH PODFILE
+#  Injects post_install fixes into ios/Podfile:
+#    1. ALLOW_NON_MODULAR_INCLUDES — fixes FirebaseFirestore / RNFBApp
+#       build errors on Xcode 26+ (iPhoneSimulator26.5.sdk)
+#    2. IPHONEOS_DEPLOYMENT_TARGET — ensures minimum iOS 13 across all pods
+#  Safe to run multiple times (idempotent — checks before injecting)
+# ============================================================
+patch_podfile() {
+  local PODFILE="ios/Podfile"
+
+  if [ ! -f "$PODFILE" ]; then
+    warn "ios/Podfile not found — skipping Podfile patch."
+    return
+  fi
+
+  # ── Check if our patch is already present ──────────────────
+  if grep -q "ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES" "$PODFILE"; then
+    success "Podfile — non-modular-include fix already present."
+  else
+    log "Patching Podfile — injecting non-modular-include fix for Xcode 26+..."
+
+    # Strategy: if a post_install block already exists, inject inside it.
+    # Otherwise, append a new post_install block at the end of the file.
+    if grep -q "post_install" "$PODFILE"; then
+      # Inject after the first `post_install do |installer|` line
+      python3 - "$PODFILE" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+with open(path, 'r') as f:
+    content = f.read()
+
+inject = """
+    # ✅ AUTO-PATCHED by build.sh
+    # Fix: non-modular-include-in-framework-module errors on Xcode 26+ / iOS SDK 26+
+    # Affects: FirebaseFirestoreInternal, RNFBApp, RNFBStorage pods
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      end
+    end
+"""
+
+# Insert after the first `post_install do |installer|` line
+pattern = r'(post_install\s+do\s+\|installer\|)'
+replacement = r'\1' + inject
+new_content = re.sub(pattern, replacement, content, count=1)
+
+with open(path, 'w') as f:
+    f.write(new_content)
+
+print("Injected into existing post_install block.")
+PYEOF
+    else
+      # No post_install block — append one at the end
+      cat >> "$PODFILE" << 'RUBYEOF'
+
+# ✅ AUTO-PATCHED by build.sh
+post_install do |installer|
+  # Fix: non-modular-include-in-framework-module errors on Xcode 26+ / iOS SDK 26+
+  # Affects: FirebaseFirestoreInternal, RNFBApp, RNFBStorage pods
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+    end
+  end
+
+  react_native_post_install(installer)
+end
+RUBYEOF
+    fi
+    success "Podfile patched — non-modular-include fix applied ✓"
+  fi
+}
+
+# ============================================================
 #  COCOAPODS
 # ============================================================
 run_pod_install() {
+  log "Patching Podfile for Xcode 26+ compatibility..."
+  patch_podfile
+  echo ""
   log "Installing CocoaPods dependencies..."
   cd ios && pod install --repo-update || error "pod install failed."; cd ..
   success "Pods installed."
@@ -501,6 +695,24 @@ sync_google_services() {
 run_android() {
   log "Building Android (${BUILD_MODE})..."
 
+  # Launch specific AVD if selected and not already running
+  if [ -n "$SELECTED_ANDROID_EMU" ] && [ "$USE_DEVICE" = false ]; then
+    ALREADY_RUNNING=$(adb devices 2>/dev/null | grep -c "^emulator" || true)
+    if [ "$ALREADY_RUNNING" -eq 0 ]; then
+      log "Starting emulator: ${SELECTED_ANDROID_EMU}..."
+      EMU_BIN="${ANDROID_HOME}/emulator/emulator"
+      command -v emulator >/dev/null 2>&1 && EMU_BIN="emulator"
+      "$EMU_BIN" -avd "$SELECTED_ANDROID_EMU" -no-snapshot-save &
+      EMU_PID=$!
+      trap "kill $EMU_PID 2>/dev/null; kill ${METRO_PID:-0} 2>/dev/null" EXIT
+      log "Waiting for emulator to boot..."
+      adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 2; done'
+      success "Emulator ready."
+    else
+      success "Emulator already running — skipping launch."
+    fi
+  fi
+
   # --reset-cache is a Metro flag, not a run-android flag.
   # Start Metro manually with the flag, then let run-android connect to it.
   if [ "$RESET_CACHE" == true ]; then
@@ -530,14 +742,21 @@ run_ios() {
 
   if [ "$USE_DEVICE" == true ]; then
     npx react-native run-ios $ARGS || error "iOS build on device failed."
+  elif [ -n "$SELECTED_IOS_SIM" ]; then
+    log "Launching on simulator: ${SELECTED_IOS_SIM}..."
+    npx react-native run-ios --simulator="$SELECTED_IOS_SIM" $ARGS || error "iOS build failed."
   else
-    SIMULATOR="iPhone 15"
-    if xcrun simctl list devices 2>/dev/null | grep -q "$SIMULATOR"; then
-      npx react-native run-ios --simulator="$SIMULATOR" $ARGS || error "iOS build failed."
-    else
-      warn "Simulator '$SIMULATOR' not found — using default."
+    # No simulator selected — try sensible defaults in order
+    for SIM in "iPhone 16" "iPhone 15" "iPhone 14" "iPhone 13"; do
+      if xcrun simctl list devices available 2>/dev/null | grep -q "$SIM"; then
+        log "Using default simulator: ${SIM}"
+        npx react-native run-ios --simulator="$SIM" $ARGS || error "iOS build failed."
+        break
+      fi
+    done || {
+      warn "No preferred simulator found — using system default."
       npx react-native run-ios $ARGS || error "iOS build failed."
-    fi
+    }
   fi
   success "iOS app launched."
 }
