@@ -14,6 +14,22 @@
       },
       "oauth_client": [
         {
+          "client_id": "382775998205-2fhcdcki4kbeuamcn89buki7hld93aee.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "co.tpcreative.moneyflow.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "382775998205-f764hniiqm6bnmjnra0rkpihfbocdk0b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "co.tpcreative.moneyflow.app",
+            "certificate_hash": "7432989525faa4fdfaa270a5ba91d7b28858ff3f"
+          }
+        },
+        {
           "client_id": "382775998205-0apkrdavr3oe2ia50j3vfhebt8adbh2k.apps.googleusercontent.com",
           "client_type": 3
         }

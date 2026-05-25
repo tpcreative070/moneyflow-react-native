@@ -79,7 +79,7 @@ android {
 
     namespace "com.moneyflow"
     defaultConfig {
-       applicationId "co.tpcreative.moneyflow.app"
+        applicationId "co.tpcreative.moneyflow.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -117,4 +117,7 @@ dependencies {
     }
 }
 
-apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")  // ← ADD THIS
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+
+// ✅ MUST be last — lets Gradle plugin process google-services.json for Firebase auto-init
+apply plugin: "com.google.gms.google-services"
