@@ -22,20 +22,35 @@ target 'moneyflow' do
   )
 
   post_install do |installer|
-    # ── Xcode 26 compatibility fix ──────────────────────────────────────────
+    # ── Xcode 26 / New Architecture / Firebase compatibility ────────────────
+    #
+    # FIX 1 — Non-modular includes: suppressed globally so FirebaseFirestore
+    #          and FirebaseFirestoreInternal can compile under Xcode 26.
+    # FIX 2 — RNFBStorage / RNFBAuth / RNFBApp implicit-int errors: silenced
+    #          with -w on the specific targets that need it.
+    # FIX 3 — DO NOT apply -fno-modules / CLANG_ENABLE_MODULES=NO to
+    #          RNFBFirestore* — doing so hides RNFBFirestoreCommon and
+    #          RNFBFirestoreQuery from scope and breaks the Firestore build.
+
+    # Targets that need the aggressive "no-modules" + silence treatment.
+    # Firestore targets are intentionally excluded.
+    RNFB_NO_MODULES_TARGETS = %w[RNFBStorage RNFBAuth RNFBApp].freeze
+
+    # ── Project-level defaults ───────────────────────────────────────────────
     installer.pods_project.build_configurations.each do |config|
       config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
 
+    # ── Per-target settings ──────────────────────────────────────────────────
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
         config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
 
-        # Suppress non-modular include errors (Xcode 26)
+        # Suppress non-modular-include errors for ALL pods (Xcode 26)
         existing_cflags = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
         unless existing_cflags.include?('-Wno-error=non-modular-include-in-framework-module')
           config.build_settings['OTHER_CFLAGS'] = \
@@ -48,14 +63,17 @@ target 'moneyflow' do
             "#{existing_cppflags} -Wno-error=non-modular-include-in-framework-module -Wno-non-modular-include-in-framework-module"
         end
 
-        # ── RNFBStorage implicit-int fix (New Arch + Xcode 26) ───────────────
-        # RNFBStorageModule.m uses Objective-C patterns that Xcode 26 treats
-        # as hard errors under New Architecture's stricter compiler settings.
-        if target.name.start_with?('RNFB')
+        # ── RNFBStorage / RNFBAuth / RNFBApp only ───────────────────────────
+        # These pods use Objective-C patterns that Xcode 26 + New Arch rejects.
+        # NOTE: RNFBFirestore is deliberately excluded — disabling modules there
+        #       hides RNFBFirestoreCommon / RNFBFirestoreQuery from scope.
+        if RNFB_NO_MODULES_TARGETS.include?(target.name)
+          config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
+          config.build_settings['DEFINES_MODULE']       = 'NO'
           existing = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
-          unless existing.include?('-Wno-implicit-int')
+          unless existing.include?('-fno-modules')
             config.build_settings['OTHER_CFLAGS'] = \
-              "#{existing} -Wno-implicit-int -Wno-return-type -Wno-error=implicit-int -Wno-error=return-type -w"
+              "#{existing} -fno-modules -Wno-implicit-int -Wno-return-type -Wno-error=implicit-int -Wno-error=return-type -w"
           end
         end
       end

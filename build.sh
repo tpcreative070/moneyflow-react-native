@@ -505,9 +505,14 @@ clean_ios() {
 # ============================================================
 #  PATCH PODFILE
 #  Injects post_install fixes into ios/Podfile:
-#    1. ALLOW_NON_MODULAR_INCLUDES — fixes FirebaseFirestore / RNFBApp
-#       build errors on Xcode 26+ (iPhoneSimulator26.5.sdk)
-#    2. IPHONEOS_DEPLOYMENT_TARGET — ensures minimum iOS 13 across all pods
+#    1. ALLOW_NON_MODULAR_INCLUDES — fixes non-modular include errors (Xcode 26+)
+#    2. CLANG_ENABLE_EXPLICIT_MODULES = NO — global explicit-modules guard
+#    3. IPHONEOS_DEPLOYMENT_TARGET   — ensures minimum iOS 13 across all pods
+#    4. CLANG_ENABLE_MODULES = NO    — fixes "Could not build Objective-C module
+#       'RNFBFirestore'" on RNFB targets
+#    5. DEFINES_MODULE = NO          — prevents bad module-map generation
+#    6. -fno-modules in OTHER_CFLAGS — fixes "Expected ')'" / "Use of undeclared
+#       identifier 'self'" / "id is not a function" in RNFBStorageModule
 #  Safe to run multiple times (idempotent — checks before injecting)
 # ============================================================
 patch_podfile() {
@@ -518,36 +523,97 @@ patch_podfile() {
     return
   fi
 
-  # ── Check if our patch is already present ──────────────────
-  if grep -q "ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES" "$PODFILE"; then
-    success "Podfile — non-modular-include fix already present."
-  else
-    log "Patching Podfile — injecting non-modular-include fix for Xcode 26+..."
+  # ── Sentinel check ─────────────────────────────────────────
+  # RNFB_NO_MODULES_TARGETS is the key marker of the refined patch.
+  # The older patch used `target.name.start_with?('RNFB')` which incorrectly
+  # disabled modules on RNFBFirestore, breaking the Firestore build.
+  # If the old broad sentinel is present but not the refined one, re-patch.
+  if grep -q "RNFB_NO_MODULES_TARGETS" "$PODFILE"; then
+    success "Podfile — Firebase/Xcode 26+ fix (refined) already present."
+    return
+  fi
 
-    # Strategy: if a post_install block already exists, inject inside it.
-    # Otherwise, append a new post_install block at the end of the file.
-    if grep -q "post_install" "$PODFILE"; then
-      # Inject after the first `post_install do |installer|` line
-      python3 - "$PODFILE" << 'PYEOF'
+  log "Patching Podfile — injecting Firebase + Xcode 26+ compatibility fix..."
+  log "  • Project-level: ALLOW_NON_MODULAR_INCLUDES, CLANG_ENABLE_EXPLICIT_MODULES=NO"
+  log "  • All targets:   non-modular-include warnings suppressed"
+  log "  • RNFB_NO_MODULES_TARGETS=[RNFBStorage,RNFBAuth,RNFBApp] — modules disabled"
+  log "  • RNFBFirestore intentionally excluded (disabling modules breaks it)"
+
+  # Strategy: if a post_install block already exists, replace its body.
+  # Otherwise, append a complete new post_install block.
+  if grep -q "post_install" "$PODFILE"; then
+
+    python3 - "$PODFILE" << 'PYEOF'
 import sys, re
 
 path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
+# The refined inject block — mirrors the actual Podfile post_install exactly.
+# Key difference from older patch:
+#   OLD: target.name.start_with?('RNFB')  — hits RNFBFirestore, breaks it
+#   NEW: RNFB_NO_MODULES_TARGETS allowlist — RNFBFirestore deliberately excluded
 inject = """
-    # ✅ AUTO-PATCHED by build.sh
-    # Fix: non-modular-include-in-framework-module errors on Xcode 26+ / iOS SDK 26+
-    # Affects: FirebaseFirestoreInternal, RNFBApp, RNFBStorage pods
+    # ✅ AUTO-PATCHED by build.sh — Firebase + New Architecture + Xcode 26+
+    # Fixes:
+    #   FIX 1 — Non-modular includes: suppressed globally so FirebaseFirestore
+    #            and FirebaseFirestoreInternal can compile under Xcode 26.
+    #   FIX 2 — RNFBStorage / RNFBAuth / RNFBApp implicit-int errors: silenced
+    #            with -w on the specific targets that need it.
+    #   FIX 3 — DO NOT apply -fno-modules / CLANG_ENABLE_MODULES=NO to
+    #            RNFBFirestore* — doing so hides RNFBFirestoreCommon and
+    #            RNFBFirestoreQuery from scope and breaks the Firestore build.
+
+    # Targets that need the aggressive "no-modules" + silence treatment.
+    # Firestore targets are intentionally excluded.
+    RNFB_NO_MODULES_TARGETS = %w[RNFBStorage RNFBAuth RNFBApp].freeze
+
+    # ── Project-level defaults ──────────────────────────────────────────────
+    installer.pods_project.build_configurations.each do |config|
+      config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+    end
+
+    # ── Per-target settings ─────────────────────────────────────────────────
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+        config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+
+        # Suppress non-modular-include errors for ALL pods (Xcode 26)
+        existing_cflags = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+        unless existing_cflags.include?('-Wno-error=non-modular-include-in-framework-module')
+          config.build_settings['OTHER_CFLAGS'] = \\
+            "#{existing_cflags} -Wno-error=non-modular-include-in-framework-module -Wno-non-modular-include-in-framework-module"
+        end
+
+        existing_cppflags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
+        unless existing_cppflags.include?('-Wno-error=non-modular-include-in-framework-module')
+          config.build_settings['OTHER_CPLUSPLUSFLAGS'] = \\
+            "#{existing_cppflags} -Wno-error=non-modular-include-in-framework-module -Wno-non-modular-include-in-framework-module"
+        end
+
+        # ── RNFBStorage / RNFBAuth / RNFBApp only ──────────────────────────
+        # NOTE: RNFBFirestore is deliberately excluded — disabling modules there
+        #       hides RNFBFirestoreCommon / RNFBFirestoreQuery from scope.
+        if RNFB_NO_MODULES_TARGETS.include?(target.name)
+          config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
+          config.build_settings['DEFINES_MODULE']       = 'NO'
+          existing = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+          unless existing.include?('-fno-modules')
+            config.build_settings['OTHER_CFLAGS'] = \\
+              "#{existing} -fno-modules -Wno-implicit-int -Wno-return-type -Wno-error=implicit-int -Wno-error=return-type -w"
+          end
+        end
       end
     end
 """
 
-# Insert after the first `post_install do |installer|` line
+# Insert after the first `post_install do |installer|` line.
+# Handles both existing blocks (inject inside) and absent blocks (appended below).
 pattern = r'(post_install\s+do\s+\|installer\|)'
 replacement = r'\1' + inject
 new_content = re.sub(pattern, replacement, content, count=1)
@@ -555,29 +621,69 @@ new_content = re.sub(pattern, replacement, content, count=1)
 with open(path, 'w') as f:
     f.write(new_content)
 
-print("Injected into existing post_install block.")
+print("Injected refined fix into existing post_install block.")
 PYEOF
-    else
-      # No post_install block — append one at the end
-      cat >> "$PODFILE" << 'RUBYEOF'
 
-# ✅ AUTO-PATCHED by build.sh
+  else
+    # No post_install block at all — append a complete one.
+    cat >> "$PODFILE" << 'RUBYEOF'
+
+# ✅ AUTO-PATCHED by build.sh — Firebase + New Architecture + Xcode 26+
 post_install do |installer|
-  # Fix: non-modular-include-in-framework-module errors on Xcode 26+ / iOS SDK 26+
-  # Affects: FirebaseFirestoreInternal, RNFBApp, RNFBStorage pods
+  # Targets that need the aggressive "no-modules" + silence treatment.
+  # FIX: RNFBFirestore intentionally excluded — disabling modules there
+  #      hides RNFBFirestoreCommon/RNFBFirestoreQuery and breaks Firestore.
+  RNFB_NO_MODULES_TARGETS = %w[RNFBStorage RNFBAuth RNFBApp].freeze
+
+  # ── Project-level defaults ────────────────────────────────────────────────
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+    config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+  end
+
+  # ── Per-target settings ───────────────────────────────────────────────────
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+
+      # Suppress non-modular-include errors for ALL pods (Xcode 26)
+      existing_cflags = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+      unless existing_cflags.include?('-Wno-error=non-modular-include-in-framework-module')
+        config.build_settings['OTHER_CFLAGS'] = \
+          "#{existing_cflags} -Wno-error=non-modular-include-in-framework-module -Wno-non-modular-include-in-framework-module"
+      end
+
+      existing_cppflags = config.build_settings['OTHER_CPLUSPLUSFLAGS'] || '$(inherited)'
+      unless existing_cppflags.include?('-Wno-error=non-modular-include-in-framework-module')
+        config.build_settings['OTHER_CPLUSPLUSFLAGS'] = \
+          "#{existing_cppflags} -Wno-error=non-modular-include-in-framework-module -Wno-non-modular-include-in-framework-module"
+      end
+
+      # ── RNFBStorage / RNFBAuth / RNFBApp only ──────────────────────────────
+      if RNFB_NO_MODULES_TARGETS.include?(target.name)
+        config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
+        config.build_settings['DEFINES_MODULE']       = 'NO'
+        existing = config.build_settings['OTHER_CFLAGS'] || '$(inherited)'
+        unless existing.include?('-fno-modules')
+          config.build_settings['OTHER_CFLAGS'] = \
+            "#{existing} -fno-modules -Wno-implicit-int -Wno-return-type -Wno-error=implicit-int -Wno-error=return-type -w"
+        end
+      end
     end
   end
 
-  react_native_post_install(installer)
+  react_native_post_install(
+    installer,
+    config[:reactNativePath],
+    :mac_catalyst_enabled => false,
+  )
 end
 RUBYEOF
-    fi
-    success "Podfile patched — non-modular-include fix applied ✓"
   fi
+  success "Podfile patched — Firebase/RNFBStorage/Xcode 26+ fix (refined) applied ✓"
 }
 
 # ============================================================
@@ -593,10 +699,153 @@ run_pod_install() {
 }
 
 # ============================================================
+#  PATCH XCODE PROJECT — registers GoogleService-Info.plist in
+#  the main app target (project navigator + Copy Bundle Resources).
+#  Without this step the file exists on disk but Xcode never
+#  bundles it, and FirebaseApp.configure() crashes at runtime.
+#  Uses the `xcodeproj` Ruby gem (already present via CocoaPods).
+# ============================================================
+patch_xcode_project_for_plist() {
+  local APP_NAME="$1"                                    # e.g. moneyflow
+  local XCODEPROJ="ios/${APP_NAME}.xcodeproj"
+  local PLIST_REL="${APP_NAME}/GoogleService-Info.plist" # relative to ios/
+
+  if [ ! -d "$XCODEPROJ" ]; then
+    warn "Xcode project not found at ${XCODEPROJ} — skipping .pbxproj patch."
+    return
+  fi
+
+  # Idempotency check — skip if already registered
+  if grep -q "GoogleService-Info.plist" "${XCODEPROJ}/project.pbxproj" 2>/dev/null; then
+    success "GoogleService-Info.plist already registered in Xcode project."
+    return
+  fi
+
+  log "Registering GoogleService-Info.plist into ${XCODEPROJ}..."
+
+  ruby - "$XCODEPROJ" "$APP_NAME" "$PLIST_REL" << 'RUBYEOF'
+require 'xcodeproj'
+
+proj_path  = ARGV[0]   # ios/moneyflow.xcodeproj
+app_name   = ARGV[1]   # moneyflow
+plist_path = ARGV[2]   # moneyflow/GoogleService-Info.plist
+
+begin
+  project = Xcodeproj::Project.open(proj_path)
+rescue => e
+  warn "Could not open Xcode project: #{e.message}"
+  exit 1
+end
+
+# Find the main app target (exact name match, fall back to first native target)
+target = project.targets.find { |t| t.name == app_name } ||
+         project.targets.find { |t| t.is_a?(Xcodeproj::Project::Object::PBXNativeTarget) }
+
+unless target
+  warn "No native target found in #{proj_path} — aborting plist registration."
+  exit 1
+end
+
+# Locate or create the group for the app folder inside ios/
+group = project.main_group.find_subpath(app_name, false) ||
+        project.main_group.find_subpath(app_name, true)
+
+# Add file reference (idempotent)
+file_ref = group.files.find { |f| f.path == 'GoogleService-Info.plist' }
+unless file_ref
+  file_ref = group.new_file('GoogleService-Info.plist')
+end
+
+# Add to Copy Bundle Resources build phase (idempotent)
+resources_phase = target.resources_build_phase
+already_added   = resources_phase.files.any? { |bf| bf.file_ref == file_ref }
+unless already_added
+  resources_phase.add_file_reference(file_ref)
+end
+
+project.save
+puts "[OK]    GoogleService-Info.plist added to target '#{target.name}' and Copy Bundle Resources ✓"
+RUBYEOF
+
+  if [ $? -eq 0 ]; then
+    success "Xcode project patched — plist now in navigator & bundle resources ✓"
+  else
+    warn "xcodeproj Ruby step failed. Add GoogleService-Info.plist manually in Xcode:"
+    warn "  1. Drag ios/${APP_NAME}/GoogleService-Info.plist into Xcode navigator"
+    warn "  2. Tick '${APP_NAME}' under 'Add to targets'"
+  fi
+}
+
+# ============================================================
+#  PATCH Info.plist — injects the reversed client ID from
+#  GoogleService-Info.plist as a CFBundleURLSchemes entry.
+#  Required for Google Sign-In on iOS: without this the OAuth
+#  redirect cannot return to the app and sign-in fails with
+#  "Your app is missing support for the following URL schemes".
+# ============================================================
+patch_info_plist_url_schemes() {
+  local APP_NAME="$1"   # e.g. moneyflow
+  local GOOGLE_PLIST="ios/${APP_NAME}/GoogleService-Info.plist"
+  local INFO_PLIST="ios/${APP_NAME}/Info.plist"
+
+  if [ ! -f "$GOOGLE_PLIST" ]; then
+    warn "GoogleService-Info.plist not found at ${GOOGLE_PLIST} — skipping URL scheme patch."
+    return
+  fi
+
+  if [ ! -f "$INFO_PLIST" ]; then
+    warn "Info.plist not found at ${INFO_PLIST} — skipping URL scheme patch."
+    return
+  fi
+
+  # Extract the REVERSED_CLIENT_ID from GoogleService-Info.plist
+  local REVERSED_CLIENT_ID
+  REVERSED_CLIENT_ID=$(plutil -extract REVERSED_CLIENT_ID raw "$GOOGLE_PLIST" 2>/dev/null)
+
+  if [ -z "$REVERSED_CLIENT_ID" ]; then
+    warn "REVERSED_CLIENT_ID not found in GoogleService-Info.plist — skipping URL scheme patch."
+    return
+  fi
+
+  # Idempotency check — skip if already present
+  if /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$INFO_PLIST" 2>/dev/null \
+      | grep -q "$REVERSED_CLIENT_ID"; then
+    success "Info.plist — Google Sign-In URL scheme already present."
+    return
+  fi
+
+  log "Patching Info.plist — adding Google Sign-In URL scheme (${REVERSED_CLIENT_ID})..."
+
+  # Find the index to append a new CFBundleURLTypes entry
+  local URL_TYPES_COUNT
+  URL_TYPES_COUNT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$INFO_PLIST" 2>/dev/null \
+    | grep -c "Dict" || echo "0")
+
+  # If CFBundleURLTypes array doesn't exist yet, create it
+  if ! /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$INFO_PLIST" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$INFO_PLIST"
+    URL_TYPES_COUNT=0
+  fi
+
+  # Append a new URL type entry for Google Sign-In
+  /usr/libexec/PlistBuddy \
+    -c "Add :CFBundleURLTypes:${URL_TYPES_COUNT} dict" \
+    -c "Add :CFBundleURLTypes:${URL_TYPES_COUNT}:CFBundleTypeRole string Editor" \
+    -c "Add :CFBundleURLTypes:${URL_TYPES_COUNT}:CFBundleURLName string GOOGLE_SIGN_IN" \
+    -c "Add :CFBundleURLTypes:${URL_TYPES_COUNT}:CFBundleURLSchemes array" \
+    -c "Add :CFBundleURLTypes:${URL_TYPES_COUNT}:CFBundleURLSchemes:0 string ${REVERSED_CLIENT_ID}" \
+    "$INFO_PLIST" \
+    && success "Info.plist — Google Sign-In URL scheme added (${REVERSED_CLIENT_ID}) ✓" \
+    || warn "PlistBuddy failed — add the URL scheme manually (see README)."
+}
+
+# ============================================================
 #  SYNC GOOGLE SERVICES FILES
 #  1. Copies config files from google-services/ → android/app/ and ios/
-#  2. Patches android/build.gradle        — ensures google-services classpath
-#  3. Patches android/app/build.gradle    — ensures google-services plugin (last line)
+#  2. Registers GoogleService-Info.plist in the Xcode project (.pbxproj)
+#  3. Injects REVERSED_CLIENT_ID URL scheme into Info.plist (Google Sign-In)
+#  4. Patches android/build.gradle        — ensures google-services classpath
+#  5. Patches android/app/build.gradle    — ensures google-services plugin (last line)
 # ============================================================
 sync_google_services() {
   local SRC_DIR="google-services"
@@ -617,13 +866,47 @@ sync_google_services() {
     fi
 
     # iOS plist
+    # Firebase requires GoogleService-Info.plist to be inside the Xcode app-target
+    # folder (ios/<AppName>/) so it gets bundled into the app at build time.
+    # Placing it only at ios/ root is NOT enough — FirebaseApp.configure() will
+    # crash at runtime with "could not find a valid GoogleService-Info.plist".
     local IOS_PLIST_SRC="$SRC_DIR/GoogleService-Info.plist"
-    local IOS_PLIST_DST="ios/GoogleService-Info.plist"
+    local APP_NAME
+    APP_NAME=$(node -e "console.log(require('./package.json').name)" 2>/dev/null || echo "moneyflow")
+    local IOS_PLIST_DST_ROOT="ios/GoogleService-Info.plist"
+    local IOS_PLIST_DST_TARGET="ios/${APP_NAME}/GoogleService-Info.plist"
     if [ -f "$IOS_PLIST_SRC" ]; then
-      cp "$IOS_PLIST_SRC" "$IOS_PLIST_DST"
-      success "Copied GoogleService-Info.plist → ios/"
+      # Copy to both locations: root (for CocoaPods scripts) and the app-target
+      # subfolder (required by Firebase to find the plist at runtime).
+      cp "$IOS_PLIST_SRC" "$IOS_PLIST_DST_ROOT"
+      if [ -d "ios/${APP_NAME}" ]; then
+        cp "$IOS_PLIST_SRC" "$IOS_PLIST_DST_TARGET"
+        success "Copied GoogleService-Info.plist → ios/ and ios/${APP_NAME}/ (app bundle target)"
+      else
+        warn "ios/${APP_NAME}/ directory not found — plist copied to ios/ root only."
+        warn "Firebase may still crash. Ensure GoogleService-Info.plist is added to your Xcode target."
+      fi
     else
       warn "google-services/GoogleService-Info.plist not found — iOS Firebase may not work."
+    fi
+
+    # ── Register plist in Xcode project (.pbxproj) ──────────
+    # Copying the file to disk is not enough — Xcode only bundles
+    # files that are registered in the project navigator + target.
+    # This is the missing step that caused FirebaseApp.configure()
+    # to crash with "could not find a valid GoogleService-Info.plist".
+    if [[ "$(uname)" == "Darwin" ]]; then
+      patch_xcode_project_for_plist "$APP_NAME"
+    fi
+
+    # ── Inject REVERSED_CLIENT_ID URL scheme into Info.plist ──
+    # Google Sign-In requires the reversed client ID to be registered
+    # as a CFBundleURLSchemes entry so iOS can redirect the OAuth
+    # response back to the app after authentication.
+    # Without this, sign-in fails with:
+    #   "Your app is missing support for the following URL schemes: ..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+      patch_info_plist_url_schemes "$APP_NAME"
     fi
   fi
 
