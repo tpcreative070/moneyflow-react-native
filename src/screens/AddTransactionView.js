@@ -8,12 +8,13 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { Colors, Radius } from '../constants/theme';
 import { useLocalization } from '../utils/localization';
-import { useTransactionStore, useCategoryStore, genId } from '../context/store';
+import { useTransactionStore, useCategoryStore, useNetworkStore, genId } from '../context/store';
 
 export default function AddTransactionView({ visible, onClose, editTx }) {
   const { str } = useLocalization();
-  const { add, update } = useTransactionStore();
-  const { categories }  = useCategoryStore();
+  const { add, update, syncPending } = useTransactionStore();
+  const { categories }               = useCategoryStore();
+  const { isConnected }              = useNetworkStore();
 
   const [type,       setType]       = useState('outcome');
   const [amount,     setAmount]     = useState('');
@@ -69,12 +70,22 @@ export default function AddTransactionView({ visible, onClose, editTx }) {
         categoryId: selCat.id, categoryName: selCat.name,
         note, date: date.toISOString(),
         attachmentBase64: attachment?.b64 ?? null,
-        synced: false, updatedAt: now,
+        synced: false,   // always start as unsynced; syncPending will flip it
+        updatedAt: now,
       };
+
       if (editTx) await update({ ...editTx, ...base });
       else        await add({ ...base, id: genId(), walletId: 'default', createdAt: now });
+
+      // Attempt immediate sync when online; failures are silently queued
+      if (isConnected) {
+        syncPending().catch(err => console.warn('[AddTransaction] syncPending error:', err));
+      }
+
       onClose();
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
